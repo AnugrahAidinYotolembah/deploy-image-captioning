@@ -148,7 +148,7 @@ st.caption("Dataset-backed captioning, zero-shot retrieval, late fusion, and SAM
 with st.sidebar:
     st.header("Runtime")
     bundle_path = st.text_input("Model bundle", value=str(DEFAULT_BUNDLE_PATH))
-    device = st.selectbox("Device", options=["auto", "cpu", "cuda"], index=0)
+    device = st.selectbox("Device", options=["auto", "cpu", "cuda"], index=1)
     show_segmented = st.toggle("Tampilkan SAM3 segmented", value=True)
 
     extra_segmented_root = st.text_input(
