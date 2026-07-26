@@ -110,7 +110,10 @@ def _choose_device(device: str | torch.device | None = None) -> torch.device:
     if isinstance(device, torch.device):
         return device
     if device and device != "auto":
-        return torch.device(device)
+        requested = torch.device(device)
+        if requested.type == "cuda" and not torch.cuda.is_available():
+            return torch.device("cpu")
+        return requested
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -189,19 +192,75 @@ class DatasetBackedCaptionModel:
         basename = os.path.basename(str(img_path))
         return self.basename_to_record.get(basename)
 
+    def caption_from_record(self, record):
+        dataset_caption = str(record.get("description", "")).strip()
+        prefix = self.cond_text.strip()
+        if dataset_caption.lower().startswith(prefix.lower()):
+            return dataset_caption
+        return f"{prefix} {dataset_caption}"
+
     def generate_caption(self, img_path):
         record = self.find_record(img_path)
         if record:
-            dataset_caption = str(record.get("description", "")).strip()
-            prefix = self.cond_text.strip()
-            if dataset_caption.lower().startswith(prefix.lower()):
-                return dataset_caption
-            return f"{prefix} {dataset_caption}"
+            return self.caption_from_record(record)
 
         if self.fallback_model is not None:
             return self.fallback_model.generate_caption(img_path)
 
         raise KeyError(f"Caption tidak ditemukan di dataset dan fallback model belum tersedia: {img_path}")
+
+
+class RetrievalCaptionModel(DatasetBackedCaptionModel):
+    def __init__(self, records, clip_model, preprocess, device, cond_text="Image of a"):
+        super().__init__(records=records, cond_text=cond_text, fallback_model=None, device=device)
+        self.clip_model = clip_model
+        self.preprocess = preprocess
+        self.text_features = None
+        self.retrieval_records = [row for row in records if str(row.get("description", "")).strip()]
+
+    def _ensure_text_features(self):
+        if self.text_features is not None:
+            return
+
+        if not self.retrieval_records:
+            raise ValueError("Dataset di bundle kosong, tidak ada caption untuk retrieval.")
+
+        captions = [self.caption_from_record(row) for row in self.retrieval_records]
+        all_features = []
+
+        with torch.no_grad():
+            for i in range(0, len(captions), 64):
+                text_tokens = clip.tokenize(captions[i:i + 64], truncate=True).to(self.device)
+                text_features = self.clip_model.encode_text(text_tokens)
+                text_features = text_features / (text_features.norm(dim=-1, keepdim=True) + 1e-8)
+                all_features.append(text_features.cpu())
+
+        self.text_features = torch.cat(all_features, dim=0).to(self.device)
+
+    def retrieve_record(self, img_path):
+        exact_record = super().find_record(img_path)
+        if exact_record is not None:
+            return exact_record
+
+        self._ensure_text_features()
+
+        image = PILImage.open(img_path).convert("RGB")
+        image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            image_features = self.clip_model.encode_image(image_tensor)
+            image_features = image_features / (image_features.norm(dim=-1, keepdim=True) + 1e-8)
+            similarities = image_features @ self.text_features.T
+            best_idx = int(similarities.argmax().item())
+
+        return self.retrieval_records[best_idx]
+
+    def find_record(self, img_path):
+        return self.retrieve_record(img_path)
+
+    def generate_caption(self, img_path):
+        record = self.retrieve_record(img_path)
+        return self.caption_from_record(record)
 
 
 @dataclass
@@ -213,7 +272,12 @@ class CaptionSystem:
     metadata: dict[str, Any]
 
 
-def load_caption_system(bundle_path: str | Path = DEFAULT_BUNDLE_PATH, device: str | torch.device | None = "auto") -> CaptionSystem:
+def load_caption_system(
+    bundle_path: str | Path = DEFAULT_BUNDLE_PATH,
+    device: str | torch.device | None = "auto",
+    clip_model_name: str | None = None,
+    use_light_retrieval: bool = True,
+) -> CaptionSystem:
     bundle_path = Path(bundle_path)
     if not bundle_path.exists():
         raise FileNotFoundError(f"Model bundle tidak ditemukan: {bundle_path}")
@@ -223,66 +287,87 @@ def load_caption_system(bundle_path: str | Path = DEFAULT_BUNDLE_PATH, device: s
         raise ValueError("Format bundle tidak dikenali. Jalankan scripts/build_model_bundle.py terlebih dahulu.")
 
     selected_device = _choose_device(device)
-    clip_name = bundle.get("model_config", {}).get("clip_model_name", "ViT-B/32")
+
+    if use_light_retrieval:
+        clip_name = clip_model_name or os.environ.get("CLIP_MODEL_NAME", "ViT-B/32")
+    else:
+        clip_name = clip_model_name or bundle.get("model_config", {}).get("clip_model_name", "ViT-L/14@336px")
 
     try:
         clip_model, preprocess = clip.load(clip_name, device=selected_device)
     except RuntimeError as error:
-        if selected_device.type == "cuda" and "out of memory" in str(error).lower():
+        if selected_device.type == "cuda":
             torch.cuda.empty_cache()
             selected_device = torch.device("cpu")
             clip_model, preprocess = clip.load(clip_name, device=selected_device)
         else:
-            raise
+            raise error
 
-    model_state = bundle["model_state"]
-    image_fc_sd = _strip_state_dict_prefix(model_state["image_encoder_fc"])
-    caption_decoder_sd = _strip_state_dict_prefix(model_state["caption_decoder"])
-
-    image_embed_dim = image_fc_sd["fc.weight"].shape[0]
-    image_encoder = CLIPImageEncoder(clip_model, embed_dim=image_embed_dim).to(selected_device)
-    image_encoder.fc.load_state_dict({
-        "weight": image_fc_sd["fc.weight"],
-        "bias": image_fc_sd["fc.bias"],
-    }, strict=True)
-
-    vocab_size, decoder_embed_dim = caption_decoder_sd["embedding.weight"].shape
-    hidden_dim = caption_decoder_sd["lstm.weight_ih_l0"].shape[0] // 4
-    caption_decoder = CaptionDecoder(
-        embed_dim=decoder_embed_dim,
-        vocab_size=vocab_size,
-        hidden_dim=hidden_dim,
-        dropout_p=0.3,
-    ).to(selected_device)
-    caption_decoder.load_state_dict(caption_decoder_sd, strict=True)
-
-    tokenizer_payload = bundle.get("tokenizer", {})
-    tokenizer = SimpleBertTokenizer(tokenizer_payload.get("vocab_tokens", []))
-
-    image_encoder.eval()
-    caption_decoder.eval()
     clip_model.eval()
 
-    fallback_model = CaptioningWrapper(
-        image_encoder=image_encoder,
-        caption_decoder=caption_decoder,
-        tokenizer=tokenizer,
-        preprocess=preprocess,
-        device=selected_device,
-    )
-    dataset_model = DatasetBackedCaptionModel(
-        records=bundle.get("dataset", {}).get("records", []),
-        cond_text=bundle.get("dataset", {}).get("cond_text", "Image of a"),
-        fallback_model=fallback_model,
-        device=selected_device,
-    )
+    records = bundle.get("dataset", {}).get("records", [])
+    cond_text = bundle.get("dataset", {}).get("cond_text", "Image of a")
+
+    if use_light_retrieval:
+        dataset_model = RetrievalCaptionModel(
+            records=records,
+            cond_text=cond_text,
+            clip_model=clip_model,
+            preprocess=preprocess,
+            device=selected_device,
+        )
+    else:
+        model_state = bundle["model_state"]
+        image_fc_sd = _strip_state_dict_prefix(model_state["image_encoder_fc"])
+        caption_decoder_sd = _strip_state_dict_prefix(model_state["caption_decoder"])
+
+        image_embed_dim = image_fc_sd["fc.weight"].shape[0]
+        image_encoder = CLIPImageEncoder(clip_model, embed_dim=image_embed_dim).to(selected_device)
+        image_encoder.fc.load_state_dict({
+            "weight": image_fc_sd["fc.weight"],
+            "bias": image_fc_sd["fc.bias"],
+        }, strict=True)
+
+        vocab_size, decoder_embed_dim = caption_decoder_sd["embedding.weight"].shape
+        hidden_dim = caption_decoder_sd["lstm.weight_ih_l0"].shape[0] // 4
+        caption_decoder = CaptionDecoder(
+            embed_dim=decoder_embed_dim,
+            vocab_size=vocab_size,
+            hidden_dim=hidden_dim,
+            dropout_p=0.3,
+        ).to(selected_device)
+        caption_decoder.load_state_dict(caption_decoder_sd, strict=True)
+
+        tokenizer_payload = bundle.get("tokenizer", {})
+        tokenizer = SimpleBertTokenizer(tokenizer_payload.get("vocab_tokens", []))
+
+        image_encoder.eval()
+        caption_decoder.eval()
+
+        fallback_model = CaptioningWrapper(
+            image_encoder=image_encoder,
+            caption_decoder=caption_decoder,
+            tokenizer=tokenizer,
+            preprocess=preprocess,
+            device=selected_device,
+        )
+        dataset_model = DatasetBackedCaptionModel(
+            records=records,
+            cond_text=cond_text,
+            fallback_model=fallback_model,
+            device=selected_device,
+        )
+
+    metadata = dict(bundle.get("metadata", {}))
+    metadata["runtime_clip_model_name"] = clip_name
+    metadata["use_light_retrieval"] = use_light_retrieval
 
     return CaptionSystem(
         dataset_model=dataset_model,
         clip_model=clip_model,
         clip_preprocess=preprocess,
         device=selected_device,
-        metadata=bundle.get("metadata", {}),
+        metadata=metadata,
     )
 
 
