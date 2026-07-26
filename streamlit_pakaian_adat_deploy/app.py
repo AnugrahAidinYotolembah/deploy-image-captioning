@@ -200,11 +200,11 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption("Developed by Anugrah Aidin Yotolembah")
     st.write("Sample image")
     samples = list_sample_images()
     sample_labels = ["Tidak pakai sample"] + [p.name for p in samples]
     sample_choice = st.selectbox("Pilih sample", options=sample_labels)
+    st.caption("Developed by Anugrah Aidin Yotolembah")
 
 uploaded_file = st.file_uploader("Upload gambar pakaian adat", type=["jpg", "jpeg", "png", "webp"])
 run_button = st.button("Run Captioning", type="primary", use_container_width=True)
