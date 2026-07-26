@@ -22,10 +22,13 @@ APP_DIR = Path(__file__).resolve().parent
 SAMPLE_DIR = APP_DIR / "sample_images"
 
 st.set_page_config(
-    page_title="Pakaian Adat Captioning",
+    page_title="citraNusa AI",
     page_icon="ID",
     layout="wide",
 )
+
+st.title("CitraNusa AI")
+st.caption("AI-powered captioning for Indonesian traditional attire.")
 
 
 @st.cache_resource(show_spinner=False)
