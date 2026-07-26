@@ -223,7 +223,7 @@ def load_caption_system(bundle_path: str | Path = DEFAULT_BUNDLE_PATH, device: s
         raise ValueError("Format bundle tidak dikenali. Jalankan scripts/build_model_bundle.py terlebih dahulu.")
 
     selected_device = _choose_device(device)
-    clip_name = bundle.get("model_config", {}).get("clip_model_name", "ViT-B/32"
+    clip_name = bundle.get("model_config", {}).get("clip_model_name", "ViT-B/32")
 
     try:
         clip_model, preprocess = clip.load(clip_name, device=selected_device)
