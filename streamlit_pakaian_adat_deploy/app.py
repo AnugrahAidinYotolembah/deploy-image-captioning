@@ -200,6 +200,7 @@ with st.sidebar:
     )
 
     st.divider()
+    st.caption("Developed by Anugrah Aidin Yotolembah")
     st.write("Sample image")
     samples = list_sample_images()
     sample_labels = ["Tidak pakai sample"] + [p.name for p in samples]
