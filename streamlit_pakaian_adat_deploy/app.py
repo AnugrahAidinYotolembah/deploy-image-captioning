@@ -151,15 +151,17 @@ st.caption("Dataset-backed caption retrieval, zero-shot retrieval, late fusion, 
 
 with st.sidebar:
     st.header("Runtime")
-    bundle_path = st.text_input("Model bundle", value=str(DEFAULT_BUNDLE_PATH))
+
+    bundle_path = str(DEFAULT_BUNDLE_PATH)
+    st.text_input(
+        "Model bundle",
+        value=DEFAULT_BUNDLE_PATH.name,
+        disabled=True,
+    )
 
     device = st.selectbox("Device", options=["cpu"], index=0)
-    clip_model_name = st.selectbox(
-        "CLIP model",
-        options=["ViT-B/32", "RN50"],
-        index=0,
-        help="Gunakan model kecil agar aman untuk Streamlit Cloud.",
-    )
+
+    clip_model_name = "ViT-B/32"
 
     show_segmented = st.toggle("Tampilkan SAM3 segmented", value=True)
 
