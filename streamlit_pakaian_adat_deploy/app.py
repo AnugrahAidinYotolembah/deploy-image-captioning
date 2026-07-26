@@ -21,7 +21,6 @@ from model_utils import (
 APP_DIR = Path(__file__).resolve().parent
 SAMPLE_DIR = APP_DIR / "sample_images"
 
-
 st.set_page_config(
     page_title="Pakaian Adat Captioning",
     page_icon="ID",
@@ -30,8 +29,13 @@ st.set_page_config(
 
 
 @st.cache_resource(show_spinner=False)
-def cached_caption_system(bundle_path: str, device: str):
-    return load_caption_system(bundle_path=bundle_path, device=device)
+def cached_caption_system(bundle_path: str, device: str, clip_model_name: str):
+    return load_caption_system(
+        bundle_path=bundle_path,
+        device=device,
+        clip_model_name=clip_model_name,
+        use_light_retrieval=True,
+    )
 
 
 def list_sample_images():
@@ -143,12 +147,20 @@ def render_results(result: dict):
 
 
 st.title("Pakaian Adat Captioning")
-st.caption("Dataset-backed captioning, zero-shot retrieval, late fusion, and SAM3 segmented display.")
+st.caption("Dataset-backed caption retrieval, zero-shot retrieval, late fusion, and SAM3 segmented display.")
 
 with st.sidebar:
     st.header("Runtime")
     bundle_path = st.text_input("Model bundle", value=str(DEFAULT_BUNDLE_PATH))
+
     device = st.selectbox("Device", options=["cpu"], index=0)
+    clip_model_name = st.selectbox(
+        "CLIP model",
+        options=["ViT-B/32", "RN50"],
+        index=0,
+        help="Gunakan model kecil agar aman untuk Streamlit Cloud.",
+    )
+
     show_segmented = st.toggle("Tampilkan SAM3 segmented", value=True)
 
     extra_segmented_root = st.text_input(
@@ -172,6 +184,8 @@ if uploaded_file is not None:
 elif sample_choice != "Tidak pakai sample" and samples:
     selected_image_path = str(samples[sample_labels.index(sample_choice) - 1])
 
+segmented_path = None
+
 if selected_image_path:
     st.subheader("Input Image")
     segmented_roots = list(DEFAULT_SEGMENTED_ROOTS)
@@ -188,14 +202,17 @@ if run_button:
         st.stop()
 
     if not Path(bundle_path).exists():
-        st.error("Model bundle belum ditemukan. Jalankan scripts/build_model_bundle.py terlebih dahulu.")
-        st.code("python scripts/build_model_bundle.py", language="bash")
+        st.error("Model bundle belum ditemukan. Pastikan file model_pakaian_adat_bundle.pt ada di folder models.")
         st.stop()
 
-    with st.spinner("Loading model dan menjalankan captioning..."):
-        system = cached_caption_system(bundle_path, device)
-        result = run_caption_pipeline(system, selected_image_path)
-        if show_segmented:
-            result["segmented_image_path"] = segmented_path
+    try:
+        with st.spinner("Loading model kecil dan menjalankan captioning..."):
+            system = cached_caption_system(bundle_path, device, clip_model_name)
+            result = run_caption_pipeline(system, selected_image_path)
+            if show_segmented:
+                result["segmented_image_path"] = segmented_path
 
-    render_results(result)
+        render_results(result)
+    except Exception as error:
+        st.error("Captioning gagal dijalankan.")
+        st.exception(error)
