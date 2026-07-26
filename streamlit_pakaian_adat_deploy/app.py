@@ -30,8 +30,11 @@ st.set_page_config(
 
 
 @st.cache_resource(show_spinner=False)
-def cached_caption_system(bundle_path: str, device: str):
-    return load_caption_system(bundle_path=bundle_path, device=device)
+def cached_caption_system(bundle_path: str):
+    return load_caption_system(
+        bundle_path=bundle_path,
+        device="cpu",
+    )
 
 
 def list_sample_images():
@@ -193,9 +196,18 @@ if run_button:
         st.stop()
 
     with st.spinner("Loading model dan menjalankan captioning..."):
+    try:
         system = cached_caption_system(bundle_path, device)
         result = run_caption_pipeline(system, selected_image_path)
+
         if show_segmented:
             result["segmented_image_path"] = segmented_path
+
+    except Exception as e:
+        import traceback
+
+        st.error(str(e))
+        st.code(traceback.format_exc())
+        st.stop()
 
     render_results(result)
