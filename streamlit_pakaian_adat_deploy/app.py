@@ -30,11 +30,8 @@ st.set_page_config(
 
 
 @st.cache_resource(show_spinner=False)
-def cached_caption_system(bundle_path: str):
-    return load_caption_system(
-        bundle_path=bundle_path,
-        device="cpu",
-    )
+def cached_caption_system(bundle_path: str, device: str):
+    return load_caption_system(bundle_path=bundle_path, device=device)
 
 
 def list_sample_images():
@@ -151,7 +148,7 @@ st.caption("Dataset-backed captioning, zero-shot retrieval, late fusion, and SAM
 with st.sidebar:
     st.header("Runtime")
     bundle_path = st.text_input("Model bundle", value=str(DEFAULT_BUNDLE_PATH))
-    device = st.selectbox("Device", options=["auto", "cpu", "cuda"], index=1)
+    device = st.selectbox("Device", options=["auto", "cpu", "cuda"], index=0)
     show_segmented = st.toggle("Tampilkan SAM3 segmented", value=True)
 
     extra_segmented_root = st.text_input(
@@ -196,18 +193,9 @@ if run_button:
         st.stop()
 
     with st.spinner("Loading model dan menjalankan captioning..."):
-    try:
         system = cached_caption_system(bundle_path, device)
         result = run_caption_pipeline(system, selected_image_path)
-
         if show_segmented:
             result["segmented_image_path"] = segmented_path
-
-    except Exception as e:
-        import traceback
-
-        st.error(str(e))
-        st.code(traceback.format_exc())
-        st.stop()
 
     render_results(result)
