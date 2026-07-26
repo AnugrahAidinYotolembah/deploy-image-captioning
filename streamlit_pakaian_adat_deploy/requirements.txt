@@ -1,10 +1,14 @@
-streamlit
-pandas
-numpy
-pillow
-nltk
-torch
-ftfy
-regex
-tqdm
-git+https://github.com/openai/CLIP.git
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+streamlit==1.60.0
+pandas==3.0.5
+numpy==2.5.1
+pillow==12.3.0
+nltk==3.10.0
+torch==2.13.0
+torchvision==0.28.0
+ftfy==6.3.1
+regex==2026.7.19
+tqdm==4.69.1
+git+https://github.com/openai/CLIP.git@d05afc436d78f1c48dc0dbf8e5980a9d471f35f6
