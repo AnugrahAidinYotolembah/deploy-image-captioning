@@ -114,12 +114,40 @@ def render_wrapped_table(df: pd.DataFrame, columns: list[str]):
     )
 
 
+def render_caption_text(text: str):
+    safe_text = html.escape(str(text))
+
+    st.markdown(
+        """
+        <style>
+        .caption-text-block {
+            font-size: 1.05rem;
+            line-height: 1.75;
+            text-align: justify;
+            text-justify: inter-word;
+            overflow-wrap: anywhere;
+            word-break: normal;
+            margin-top: 0.25rem;
+            margin-bottom: 1.5rem;
+            color: inherit;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"<div class='caption-text-block'>{safe_text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_results(result: dict):
     st.subheader("Generated Caption")
-    st.write(result["main_caption"])
+    render_caption_text(result["main_caption"])
 
     st.subheader("Enhanced Caption")
-    st.write(result["enhanced_caption"])
+    render_caption_text(result["enhanced_caption"])
 
     st.subheader("Zero-Shot Retrieval")
     zero_df = pd.DataFrame(result["zero_shot_results"])
