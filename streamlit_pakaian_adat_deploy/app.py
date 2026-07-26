@@ -27,8 +27,6 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("CitraNusa AI")
-st.caption("AI-powered captioning for Indonesian traditional attire.")
 
 
 @st.cache_resource(show_spinner=False)
@@ -177,7 +175,8 @@ def render_results(result: dict):
         st.code(format_text_report(result), language="text")
 
 
-st.title("Pakaian Adat Captioning")
+st.title("CitraNusa AI")
+st.caption("Captioning otomatis untuk citra pakaian adat Indonesia.")
 st.caption("Dataset-backed caption retrieval, zero-shot retrieval, late fusion, and SAM3 segmented display.")
 
 with st.sidebar:
